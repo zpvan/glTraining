@@ -382,11 +382,166 @@ glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR); 
 glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 ```
 
+### 使用
 
+#### 顶点数据
 
+我们的顶点数组中需要三样东西: 位置, 颜色, 纹理坐标.
 
+```c
+float vertices[] = {
+    // 位置               // 颜色           // 纹理坐标
+     0.5f,   0.5f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f, 1.0f, // 右上角
+     0.5f,  -0.5f, 0.0f, 0.0f, 1.0f, 0.0f, 1.0f, 0.0f, // 右下角
+    -0.5f, -0.5f,  0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, // 左下角
+    -0.5f,  0.5f,  0.0f, 1.0f, 1.0f, 0.0f, 0.0f, 1.0f // 左上角
+}；
+```
 
+<img src="./data/vertex-array-struct.png" style="zoom:100%"/>
 
+可以看到, 我们的跨度变成了32, 也就是8sizeof(float), 颜色的起始偏移值为3sizeof(float), 纹理的起始偏移值为6sizeof(float). 这样, 我们指定顶点属性的自然需要指定相应的位置和偏移.
+
+颜色属性:
+
+```c
+glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *)(3 * sizeof(float)));
+glEnableVertexAttribArray(1);
+```
+
+纹理属性:
+
+```c
+glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *)(6 * sizeof(float)));
+glEnableVertexAttribArray(2);
+```
+
+顶点着色器
+
+```glsl
+#version 330 core
+
+layout (location = 0) in vec3 aPos;
+layout (location = 1) in vec3 aColor;
+layout (location = 2) in vec2 aTexCoord;
+
+out vec3 ourColor;
+out vec2 TexColor;
+
+void main() {
+    gl_Position = vec4(aPos, 1.0);
+    ourColor = aColor;
+    TexCoord = aTexCoord;
+}
+```
+
+片元着色器
+
+```glsl
+#version 330 core
+
+out vec4 FragColor;
+
+in vec3 ourColor;
+in vec2 TexCoord;
+
+uniform sampler2D ourTexture;
+
+void main() {
+    FragColor = texture(ourTexture, TexCoord); // 对纹理指定位置进行采样
+}
+```
+
+创建纹理
+
+```c
+unsigned int texture;
+glGenTextures(1, &texture);
+
+/**
+ * 第一个参数是创建的纹理数量
+ * 第二个参数是保存那么多数量的整型数组
+**/
+```
+
+创建完之后, 我们需要绑定到OpenGL的环境里才能操作
+
+```c
+glBindTexture(GL_TEXTURE_2D, texture);
+```
+
+绑定完成后, 就把之前加载的图片数据放到纹理中去了
+
+```c
+glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, data);
+/**
+ * 参数一: 指定目标纹理. GL_TEXTURE_2D就表示当前的操作会对绑定的2D纹理产生作用(GL_TEXTURE_1D和GL_TEXTURE_3D里边的东西就不会受影响)
+ * 参数二: mipmap层级. 我们之后会调用glGenerateMipmap来创建, 这里只需要创建原始图就行了
+ * 参数三: 我们需要保存的纹理格式. 我们的图片只有RGB信息, 所以用GL_RGB格式
+ * 参数四和参数五: 纹理图片的宽高
+ * 参数六: 一定要设置成0
+ * 参数七和参数八: 源图片的格式和数据类型. 我们加载的图片中有RGB值, 并且以字节的方式保存
+ * 参数九: 加载的图片数据
+**/
+glGenerateMipmap(GL_TEXTURE_2D);
+```
+
+## 显示不同的纹理
+
+### 纹理单元
+
+纹理是通过纹理单元这个东西绑定到OpenGL环境中的. 纹理单元应该是OpenGL中内置的关于纹理的一些配置, OpenGL会根据这些配置来操作纹理. 在OpenGL中, 纹理单元的数量至少有16个, 我们可以通过GL_TEXTURE0 … GL_TEXUTRE15来激活使用. 默认激活的是GL_TEXTURE0, 所以我们之前的操作都是针对GL_TEXTURE0的.
+
+让我们来激活另一个纹理单元并且对它进行一些操作.
+
+首先, 我们用glActiveTexture(GL_TEXTURE1)来激活纹理单元1, 使之可操作.
+
+然后, 将一个新的纹理ID绑定到这个纹理对象上, 我们不妨将这个新ID定义成texture2, 调用glBindTexture(GL_TEXTURE_2D, texture2)进行绑定.
+
+接下来, 如同之前一样, 设置好环绕和过滤方式.
+
+```c
+glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+```
+
+接着, 把图片加载进去, 绑定到当前的纹理单元上.
+
+```c
+glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
+glGenerateMipmap(GL_TEXTURE_2D);
+```
+
+最后, 我们需要告诉OpenGL着色器采样器和纹理单元之间的对应关系.
+
+同时, 片元着色器也需要做相应的改动:
+
+```c
+uniform sampler2D texture1;
+uniform sampler2D texture2;
+
+void main() {
+    FragColor = mix(texture(texture1, TexCoord), texture(texture2, TexCoord), 0.2);
+}
+```
+
+mix函数是对某个点的纹理进行混合运算, 0.2表示该点的颜色20%来自采样器2, 80%来自采样器1.
+
+### 融合因子控制
+
+直觉上的, 我们需要三步走:
+
+* 第一步: 定义一个全局的融合因子
+* 第二步: 点击上下箭头的时候设置这个值
+* 第三步: 设置这个融合因子变量值
+
+## 转换(数学基础知识)
+
+### 向量
+
+向量就是用来表示方向的. 向量包括大小和方向两个要素.
 
 
 
