@@ -426,7 +426,7 @@ layout (location = 1) in vec3 aColor;
 layout (location = 2) in vec2 aTexCoord;
 
 out vec3 ourColor;
-out vec2 TexColor;
+out vec2 TexCoord;
 
 void main() {
     gl_Position = vec4(aPos, 1.0);
@@ -746,9 +746,10 @@ float vertices[] = {
 修改顶点属性的设置
 
 ```c
-glVertexAttribPointer(0, 3, GL_FLOAT, GL_FLASE, 5 * sizeof(float), (void *)0);
+glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void *)0);
 glEnableVertexAttribArray(0);
-glVertexAttribPointer(1, 3, GL_FLOAT, GL_FLASE, 5 * sizeof(float), (void *)(3 * sizeof(float)));
+glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void *)(3 * sizeof(float)));
+GLES30.glEnableVertexAttribArray(1);
 ```
 
 修改顶点着色器中的纹理坐标位置
@@ -959,8 +960,8 @@ view = glm::lookAt(glm::vec3(0.0f, 0.0f, 4.0f),
 
 ```c
 float radius = 10.0f;
-float camX = sin(glfwGetTime() * radius);
-float camZ = cos(glfwGetTime() * radius);
+float camX = sin(glfwGetTime()) * radius;
+float camZ = cos(glfwGetTime()) * radius;
 glm::mat4 view;
 view = glm::lookAt(glm::vec3(camX, 0.0f, camZ),
                   glm::vec3(0.0f, 0.0f, 0.0f),
