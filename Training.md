@@ -1149,6 +1149,410 @@ projection = glm::perspective(glm::radians((float)fov), (float)SCR_WIDTH / (floa
 
 使用四元数的方法, 解决这个问题
 
+## 基本光照模拟
+
+如何用OpenGL模拟基本光照, 涉及如下几个概念:
+
+* 颜色的原理
+* 环境光原理
+* 漫反射光原理
+* 镜面高光原理
+* 显示一个包含所有这些光的场景
+
+### 颜色
+
+在OpenGL中, 我们用一个红色, 绿色和蓝色的分量组成一个RGB格式的向量来表示颜色. 举个例子, 一个珊瑚红色的颜色向量是这样的:
+
+```c
+glm::vec3 coral(1.0f, 0.5f, 0.31f);
+```
+
+事实上, 物体本身并没有颜色. 我们看到的颜色是物体表面对光照的反射属性不同, 反射出来的不同的光的颜色.
+
+<img src="./data/reflection.png" style="zoom:100%"/>
+
+可以看到, 物体反射出来的红色最多, 将其他的颜色掩盖之后, 我们看到的就是一个红色的物体, 未被反射出来的光都被物体吸收了.
+
+那么如何在OpenGL中模拟这种情况呢? 其实我们已经定义好了. 在上面定义的coral变量中, 我们指明了红色会完全反射(1.0f), 绿色会反射一半(0.5f), 而蓝色会反射31%(0.31f). 当有一束白色的光(1.0f, 1.0f, 1.0f)照射到coral上时, 将两个向量相乘, 所得到的向量就是最终物体上的颜色向量.
+
+```c
+glm::vec3 lightColor(1.0f, 1.0f, 1.0f);
+glm::vec3 toyColor(1.0f, 0.5f, 0.31f);
+glm::vec3 result = lightColor * toyColor; // = (1.0f, 0.5f, 0.31f)
+```
+
+### 实现一个有光照的场景
+
+我们会通过模拟现实生活中的光照实现一些非常有趣的效果. 所以, 撇开之前的纹理, 我们重新来弄一个见到的场景, 再往里边面添加光照效果.
+
+我们首先要做的就是创建一个可以接受光照的物体, 方便起见, 还是用一个立方体盒子, 我们还需要一个东西来模拟光源, 东西越简单越好, 最好还是一个立方体盒子.
+
+填充VBO, 设置顶点属性等等的工作.
+
+新的立方体上, 我们只需要位置属性, 去除之前的纹理, 在顶点着色器中对顶点进行转换就可以了.
+
+```glsl
+// 顶点着色器
+#version 330 core
+
+layout (location = 0) in vec3 aPos;
+
+uniform mat4 model;
+uniform mat4 view;
+uniform mat4 projection;
+
+void main() {
+    gl_Position = projection * view * model * vec4(aPos, 1.0f);
+}
+```
+
+确保已经更新了顶点属性的配置, 只有位置属性的顶点跨度为3 * sizeof(float)
+
+```c
+// 顶点属性环境
+unsigned int VBO, VAO;
+
+glGenVertexArrays(1, &VAO);
+glBindVertexArray(VAO);
+
+glGenBuffers(1, &VBO);
+glBindBuffer(GL_ARRAY_BUFFER, VBO);
+glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+
+// 顶点属性设置
+glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void *)0);
+glEnableVertexAttribArray(0);
+```
+
+定义完立方体之后, 再来弄一个片元着色器
+
+```glsl
+#version 330 core
+
+out vec4 FragColor;
+
+uniform vec3 objectColor;
+uniform vec3 lightColor;
+
+void main() {
+    FragColor = vec4(lightColor * objectColor, 1.0);
+}
+```
+
+片元着色器需要物体颜色和光照颜色两个uniform变量来计算. 这里我们根据之前的理解, 直接将两个变量相乘, 再添加一个齐次分量后赋值给片元颜色. 我们来设置物体颜色和光照颜色.
+
+```c
+lightingShader.use();
+lightingShader.setVec3("objectColor", 1.0f, 0.5f, 0.31f);
+lightingShader.setVec3("lightColor", 1.0f, 1.0f, 1.0f);
+```
+
+当我们改变着色器的时候, 我们只希望物体的颜色变化, 而希望连光源的颜色都变了, 所以, 这里我们还要多定义一个片元着色器用于对光源进行渲染
+
+```glsl
+#version 330 core
+
+out vec4 FragColor;
+
+void main() {
+    FragColor = vec4(1.0);
+}
+```
+
+很简单, 只需要讲光源设置成白色就行. 当我们绘制盒子立方体时, 我们使用前面的那个着色器, 当我们绘制光源立方体时, 我们使用这个着色器
+
+定义一个光源的位置, 然后将光源立方体移动到指定位置
+
+```c
+glm::vec3 lightPos(1.2f, 1.0f, 2.0f);
+...
+model = glm::mat4();
+model = glm::translate(model, lightPos);
+model = glm::scale(model, glm::vec3(0.2f));
+```
+
+在渲染的时候, 对盒子立方体, 要用lightShader, 对光源立方体, 要用lampShader.
+
+### 基础光照
+
+现实世界中的光照受太多因素的影响, 以至于我们根本就没有足够的计算力来计算其所有的因素. OpenGL中使用一些简单的模型来模拟真实世界中的光照, 将这些模型组合起来后, 我们也能得到非常逼真的效果. 有一种模型叫做: 冯氏光照模式(Phong light model). 这种模型有三种光照组成: 环境光(ambient), 漫反射光(diffuse) 和镜面高光(specular). Phong光照模型是图形学中最常用的模型, 用了之后效果也非常赞. 来看一组效果图:
+
+<img src="./data/phong-light-model.png" style="zoom:100%"/>
+
+* 环境光(Ambient): 即便是在漆黑的夜晚也还是有少许亮光的存在(月亮, 远处的灯光, 星光), 所以, 物体不会是完全的黑色. 为了模拟这种情况, 我们通常会给定一个常量颜色值充当环境光
+* 漫反射光(diffuse): 模拟光直接照射到物体上的情况. 这时光照模型中最具有特点的组成部分. 越朝向光源的部分看起来就越亮
+* 镜面高光(specular): 模拟一个非常光滑的物体上的聚光灯效果. 镜面高光受光照颜色的影响比受物体颜色的影响更大
+
+想要让场景中的效果逼真, 我们至少需要模拟这三种光照. 先从最简单的开始: 环境光(Ambient)
+
+#### 环境光(Ambient)
+
+光照通常不会来自一个单一的光源, 而是在场景中各个光源, 各种反射或折射综合而成的一个效果. 将这些因素都考虑进去的算法称作全局光照算法, 但是这些算法非常难懂而且运行起来代价高昂.
+
+于是, 我们自然而然地寻找一些简单的方法来替代这些高昂的算法, 终于, 我们找到了环境光这种模型. 就如之前所说, 我们使用一个小常量颜色来代替照射到物体的环境光.
+
+使用环境光非常的简单, 我们只需要设置一个环境光强度, 用这个强度值乘上光源的颜色得到环境光颜色. 最后, 用环境光颜色乘上物体的颜色, 得到物体在光照下的最终颜色值, 使用环境光的代码如下:
+
+```glsl
+void main() {
+    float ambientStrength = 0.1;
+    vec3 ambient = ambientStrength * lightColor;
+    vec3 result = ambient * objectColor;
+    FragColor = vec4(result, 1.0f);
+}
+```
+
+#### 漫反射光(Diffuse)
+
+相对于环境光(ambient)来说, 漫反射光(Diffuse)在物体上的表现更明显, 也给了物体最直观的特征. 为了能更好的理解漫反射, 请看下面的一张图:
+
+<img src="./data/diffuse.jpg" style="zoom:100%"/>
+
+我们的物体表面并不会那么光滑平整, 光线照射到物体表面的时候会产生方向不同的反射效果, 这些反射就是漫反射. 漫反射光(Diffuse)期望模拟的, 就是这种光线照射上来之后, 经过物体复杂的漫反射之后所呈现出的整体的光照效果.
+
+那么, 我们如何计算漫反射呢?
+
+* 法向量(Normal Vector): 垂直于顶点表面的一个向量
+* 光线向量: 片元位置和光源之间的一个方向向量, 用于计算与法向量之间的夹角
+* 计算光线向量和法向量之间的夹角, 如果夹角<90度, 说明物体是对着光源的, 再根据cos值来计算强度. 如果夹角>90度, 说明物体背对光源, 光照也就没效果了
+
+##### 法向量(Normal Vector)
+
+法向量是垂直于顶点表面的单位向量. 因为顶点本身是没有表面这个概念的, 所以我们会参考周围的顶点来确定它的表面, 从而计算出法向量. 在计算法向量的时候, 我们用了一些小技巧(叉乘). 因为3D立方体并不复杂, 所以我们手动计算了所有顶点的法向量. 完整的顶点结构如下:
+
+```c
+float vertices[] = {
+    // X       Y      Z    Nx    Ny     Nz
+    -0.5f, -0.5f, -0.5f, 0.0f, 0.0f, -1.0f,
+    0.5f, -0.5f, -0.5f, 0.0f, 0.0f, -1.0f,
+    0.5f, 0.5f, -0.5f, 0.0f, 0.0f, -1.0f,
+    0.5f, 0.5f, -0.5f, 0.0f, 0.0f, -1.0f,
+    -0.5f, 0.5f, -0.5f, 0.0f, 0.0f, -1.0f,
+    -0.5f, -0.5f, -0.5f, 0.0f, 0.0f, -1.0f,
+
+    -0.5f, -0.5f, 0.5f, 0.0f, 0.0f, 1.0f,
+    0.5f, -0.5f, 0.5f, 0.0f, 0.0f, 1.0f,
+    0.5f, 0.5f, 0.5f, 0.0f, 0.0f, 1.0f,
+    0.5f, 0.5f, 0.5f, 0.0f, 0.0f, 1.0f,
+    -0.5f, 0.5f, 0.5f, 0.0f, 0.0f, 1.0f,
+    -0.5f, -0.5f, 0.5f, 0.0f, 0.0f, 1.0f,
+
+    -0.5f, 0.5f, 0.5f, -1.0f, 0.0f, 0.0f,
+    -0.5f, 0.5f, -0.5f, -1.0f, 0.0f, 0.0f,
+    -0.5f, -0.5f, -0.5f, -1.0f, 0.0f, 0.0f,
+    -0.5f, -0.5f, -0.5f, -1.0f, 0.0f, 0.0f,
+    -0.5f, -0.5f, 0.5f, -1.0f, 0.0f, 0.0f,
+    -0.5f, 0.5f, 0.5f, -1.0f, 0.0f, 0.0f,
+
+    0.5f, 0.5f, 0.5f, 1.0f, 0.0f, 0.0f,
+    0.5f, 0.5f, -0.5f, 1.0f, 0.0f, 0.0f,
+    0.5f, -0.5f, -0.5f, 1.0f, 0.0f, 0.0f,
+    0.5f, -0.5f, -0.5f, 1.0f, 0.0f, 0.0f,
+    0.5f, -0.5f, 0.5f, 1.0f, 0.0f, 0.0f,
+    0.5f, 0.5f, 0.5f, 1.0f, 0.0f, 0.0f,
+
+    -0.5f, -0.5f, -0.5f, 0.0f, -1.0f, 0.0f,
+    0.5f, -0.5f, -0.5f, 0.0f, -1.0f, 0.0f,
+    0.5f, -0.5f, 0.5f, 0.0f, -1.0f, 0.0f,
+    0.5f, -0.5f, 0.5f, 0.0f, -1.0f, 0.0f,
+    -0.5f, -0.5f, 0.5f, 0.0f, -1.0f, 0.0f,
+    -0.5f, -0.5f, -0.5f, 0.0f, -1.0f, 0.0f,
+
+    -0.5f, 0.5f, -0.5f, 0.0f, 1.0f, 0.0f,
+    0.5f, 0.5f, -0.5f, 0.0f, 1.0f, 0.0f,
+    0.5f, 0.5f, 0.5f, 0.0f, 1.0f, 0.0f,
+    0.5f, 0.5f, 0.5f, 0.0f, 1.0f, 0.0f,
+    -0.5f, 0.5f, 0.5f, 0.0f, 1.0f, 0.0f,
+    -0.5f, 0.5f, -0.5f, 0.0f, 1.0f, 0.0f
+};
+```
+
+当我们加入了额外的顶点属性之后, 条件反射式的就要去修改传递给OpenGL的信息. 请注意, 两个立方体虽然公用一组数据, 但是物体需要法线信息, 而光源不需要法线信息. 因此, 一个重要的操作就是把渲染物体的VAO和渲染光源的VAO分开, 各自设置自己的顶点属性: 物体需要全部的顶点属性, 光源只需要位置的属性
+
+```c
+// VBO, 物体VAO
+unsigned int VBO, cubeVAO;
+glGenVertexArrays(1, &cubeVAO);
+glGenBuffers(1, &VBO);
+
+glBindBuffer(GL_ARRAY_BUFFER, VBO);
+glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+
+glBindVertexArray(cubeVAO);
+
+// 位置属性
+glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void *)0);
+glEnableVertexAttribArray(0);
+// 法向量属性
+glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void *)0);
+glEnableVertexAttribArray(1);
+
+// 光源VAO (VBO相同, 因为顶点数据是同一组)
+unsigned int ligthVAO;
+glGenVertexArrays(1, &lightVAO);
+glBindVertexArray(lightVAO);
+
+glBindBuffer(GL_ARRAY_BUFFER, VBO);
+// 位置属性(只需要更新跨度就可以了)
+glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void *)0);
+glEnableVertexAttribArray(0);
+```
+
+接着光照顶点着色器中要接受法向量进行操作, 然后输出法向量, 片元着色器中也要接受法向量进行计算
+
+```c
+// 顶点着色器
+...
+layout (location = 1) in vec3 aNormal;
+...
+out vec3 Normal;
+...
+void main() {
+    gl_Position = projection * view * model * vec4(aPos, 1.0f);
+    Normal = aNormal;
+}
+```
+
+```glsl
+// 片元着色器
+...
+in vec3 Normal;
+...
+```
+
+##### 计算漫反射颜色
+
+现在我们的顶点有了法向量, 还却光源位置和片元位置. 光源位置是一个静态的变量我们直接在片元着色器中定义成uniform变量
+
+```glsl
+// 片元着色器
+uniform vec3 lightPos;
+```
+
+而后, 在主函数中设置光源位置
+
+```c
+lightingShader.setVec3("lightPos", lightPos);
+```
+
+最后, 我们还要计算出片元的位置. 要计算片元位置, 我们只要将位置与模型矩阵相乘就可以了
+
+```glsl
+out vec3 FragPos;
+out vec3 Normal;
+
+void main() {
+    gl_Position = projection * view * model * vec4(aPos, 1.0f);
+    FragPos = vec3(model * vec4(aPos, 1.0));
+    Normal = aNormal;
+}
+```
+
+也别忘了在片元着色器中加上接受片元位置的变量.
+
+```glsl
+in vec3 FragPos;
+```
+
+紧接着, 我们来计算漫反射颜色. 思路是:
+
+* 计算片元指向光源的向量(光源向量)
+* 规范化光源向量和法线向量
+* 计算光源向量和法线向量的点积, 将该值乘上光源颜色值
+
+```glsl
+// 计算光源向量, 规范化两个向量
+vec3 norm = normalize(Normal);
+vec3 lightDir = normalize(lightPos - FragPos);
+// 计算点积, 修正点积值, 乘上光源颜色值
+float diff = max(dot(norm, lightDir), 0.0); //负数没有意义
+vec3 diffuse = diff * lightColor;
+```
+
+最后的最后, 将环境光(ambient)和漫反射(diffuse)相加起来, 再乘上物体颜色, 得到最终的结果
+
+##### 还有一件事
+
+前面的代码中, 我们直接将法向量从顶点着色器传递到了片元着色器. 不过, 我们在计算的时候, 用的都是世界空间中的坐标, 难道我们不该把法向量也转换成世界空间中的坐标吗? 原则上, 是的, 不过转换操作并不是乘上一个模型矩阵那么简单.
+
+首先, 法向量只有方向有意义(因为我们不需要它在空间中的位置信息). 所以, 我们只对法向量的比例变化和旋转变换感兴趣. 要去除模型矩阵中的平移操作的话, 需要将法向量的齐次坐标(w) 设置为0
+
+然后, 如果模型矩阵进行了一个不规则的比例变换, 那么即使法向量乘上模型矩阵, 法向量也不会和表面垂直了. 如下图所示:
+
+<img src="./data/normalize-scale-by.png" style="zoom:100%"/>
+
+法向量不和表面垂直会严重扭曲光照效果.
+
+解决这个问题的方法是为法向量量身定制一个模型矩阵, 这个矩阵被称为向量矩阵(normal matrix), 其使用了一些线性代数的操作来消除对法向量的比例变换影响
+
+详细的原理超出了本文的讨论范围, 下面直接给出计算的方法:
+
+```glsl
+Normal = mat3(transpose(inverse(model)) * aNormal);
+```
+
+模型矩阵的逆矩阵的转置矩阵, 就是这货.
+
+
+
+前面我们没对法向量转换却没出问题纯粹是侥幸, 因为我们没有对模型进行任何比例变换或者是旋转的操作. 但是, 一旦有这两种操作, 就必须对法向量进行变换.
+
+#### 镜面高光(Specular)
+
+和漫反射很类似, 镜面高光液是基于光源方向向量和物体表面法向量的. 不同的是, 镜面高光也取决于观察者看物体的角度. 想象一下, 如果物体想镜子一样光滑, 我们就能在某个位置看到非常强烈的光照. 原理如下图所示:
+
+<img src="./data/specular.png" style="zoom:100%"/>
+
+将光源方向沿着法向量对称一下,  我们就得到了反射光向量. 然后, 计算出反射光向量和观察者方向的角度差, 角度差越小, 光照越强.
+
+
+
+观察者方向是一个额外我们需要计算的东西, 可以通过观察者位置(世界空间)和片元位置计算出来. 然后, 计算出镜面反射强度, 乘以光照颜色, 将它与环境光和漫反射光加起来, 得到的就是完整的光照效果.
+
+
+
+在片元着色器中添加观察者位置变量, 然后在主循环中设置
+
+```glsl
+uniform vec3 viewPos;
+```
+
+```c
+lightingShader.setVec3("viewPos", camera.Position);
+```
+
+设置一个镜面反射强度, 控制镜面反射光对物体的影响程度
+
+```glsl
+float specularStrength = 0.5;
+```
+
+计算反射光向量
+
+```glsl
+vec3 viewDir = normalize(viewPos - FragPos);
+vec3 reflectDir = reflect(-lightDir, norm);
+```
+
+最后, 计算镜面高光的强度, 用下面的公式:
+
+```glsl
+float spec = pow(max(dot(viewDir, reflectDir), 0.0), 32);
+vec3 specular = specularStrength * spec * lightColor;
+```
+
+我们先计算了观察方向和反射方向的夹角(并确保其大于0), 然后计算了它的32次方值. 这个32表示了高光的光泽度信息. 光泽度越高, 高光范围越集中. 如下图所示:
+
+<img src="./data/glossiness.png" style="zoom:100%"/>
+
+通常, 光泽度设置成32就可以了. 最后, 把镜面高光的部分添加到总的结果里边去. 我们就完成了冯氏光照模型.
+
+
+
+
+
+
+
 
 
 
