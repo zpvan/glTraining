@@ -1549,7 +1549,120 @@ vec3 specular = specularStrength * spec * lightColor;
 
 通常, 光泽度设置成32就可以了. 最后, 把镜面高光的部分添加到总的结果里边去. 我们就完成了冯氏光照模型.
 
+## 材质控制光照效果
 
+如何使用材质控制光照效果? 真实世界里, 每个物体对光的反射属性都不同. 铁轮子永远都比木轮子要闪亮. 物体对于镜面高光的反应也不同. 有些物体没有太多散射, 就呈现出一个集中的亮斑; 有些物体的散射多, 就不会有那么小那么亮的亮斑了. 如何描述物体的这些特性, 我们就需要一个新的概念, 那就是: 材质.
+
+### 材质
+
+前面, 我们指定了物体和光源的颜色, 用环境光强度和散射光强度来做物体的反射属性. 使用材质属性的时候, 我们依旧需要指定描述环境光, 漫反射光和镜面高光的分量. 除此之外, 我们还需要一个光泽度(shininess)参数用来表示镜面高光的发散范围.
+
+我们的材质结构也就成型了:
+
+```glsl
+#version 330 core
+struct Material {
+    vec3 ambient;
+    vec3 diffuse;
+    vec3 specular;
+    float shininess;
+}
+
+uniform Material material;
+```
+
+在片元着色器中, 我们创建了一个材质结构来保存物体的材质属性. 有了这四个分量之后, 我们就能模拟一些真实世界中德物体了.
+
+要得到物体的精确材质是一件非常费时又费力的事情, 而用一个不正确的材质毁掉物体本来该有的视觉效果确实非常容易的事.
+
+让我们在着色器中来实现这样一个材质系统.
+
+### 使用材质
+
+既然我们已经在片元着色器中创建了一个材质结构, 接下来要做的就是使用材质属性来计算光照效果. GLSL中引用结构体中的成员和C语言中一样, 采用material.ambient的形式就可以:
+
+```glsl
+void main() {
+    // 环境光
+    vec3 ambient = lightColor * material.ambient;
+    
+    // 漫反射光
+    vec3 norm = normalize(Normal);
+    vec3 lightDir = normalize(LightPos - FragPos);
+    
+    float diff = max(dot(norm, lightDir), 0.0);
+    vec3 diffuse = lightColor * (diff * material.diffuse);
+    
+    // 镜面高光
+    vec3 viewDir = normalize(-FragPos);
+    vec3 reflectDir = reflect(-lightDir, norm);
+    float spec = pow(max(dot(viewDir, reflectDir), 0.0), material.shiniess);
+    vec3 specular = lightColor * (spec * material.specular);
+    
+    vec3 result = ambient + diffuse + specular;
+    FragColor = vec4(result, 1.0f);
+}
+```
+
+就如代码中写的那样, 我们用材质的属性乘上光照颜色作为光照的效果. 要设置材质的属性, 只能设置材质结构中德某个属性, 而不能直接设置整个材质结构. 所以, 设置的代码就只能是下面这个样子:
+
+```c
+lightingShader.setVec3("material.ambient", 1.0f, 0.5f, 0.31f);
+lightingShader.setVec3("material.diffuse", 1.0f, 0.5f, 0.31f);
+lightingShader.setVec3("material.specular", 0.5f, 0.5f, 0.5f);
+lightingShader.setFloat("material.shininess", 32.0f);
+```
+
+效果有点奇怪
+
+### 光照属性
+
+我们发现material.ambient数值并不是0.1这样小的数值, 而是几乎把所有光都反射回去了. 从另一个角度来讲, 一个光源对环境光, 漫反射光和镜面高光的贡献应该也是不同的. 对环境光的贡献应该很小, 漫反射应该次之, 镜面高光最大. 所以, 这次我们不改material.ambient的数值, 而是为光源也设置光源属性.
+
+```glsl
+struct Light {
+    vec3 ambient;
+    vec3 diffuse;
+    vec3 specular;
+};
+uniform Light light;
+```
+
+添加了光源的属性之后, 我们也需要更新一下光照计算的代码.
+
+```glsl
+vec3 ambient = lightColor * material.ambient * light.ambient;
+vec3 diffuse = lightColor * (diff * material.diffuse) * light.diffuse;
+vec3 specular = lightColor * (spec * material.specular) * light.specular;
+```
+
+然后, 在主函数中设置光照属性:
+
+```c
+lightingShader.setVec3("light.ambient", 0.2f, 0.2f, 0.2f);
+lightingShader.setVec3("light.diffuse", 0.5f, 0.5f, 0.5f);
+lightingShader.setVec3("light.specular", 1.0f, 1.0f, 1.0f);
+```
+
+现在的效果就好了很多.
+
+### 实现一个绿宝石的颜色
+
+正如之前所说的, 要得到一个正确的材质并不容易, 我们可以一个个数据区试验, 但这太浪费时间了. 下面一张表是有人整理出来的, 我们照方抓药就行.
+
+<img src="./data/material.png" style="zoom:100%"/>
+
+```c
+lightingShader.setVec3("material.ambient", 0.0215f, 0.1745f, 0.0215f);
+lightingShader.setVec3("material.diffuse", 0.07568f, 0.61424f, 0.07568f);
+lightingShader.setVec3("material.specual", 0.633f, 0.727811f, 0.633f);
+lightingShader.setFloat("material.shininess", 128 * 0.6f);
+lightingShader.setVec3("light.ambient", 1.0f, 1.0f, 1.0f);
+lightingShader.setVec3("light.diffuse", 1.0f, 1.0f, 1.0f);
+lightingShader.setVec3("light.specular", 1.0f, 1.0f, 1.0f);
+```
+
+ 能看到绿宝石的粗糙版本了
 
 
 
