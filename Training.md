@@ -1664,6 +1664,8 @@ lightingShader.setVec3("light.specular", 1.0f, 1.0f, 1.0f);
 
  能看到绿宝石的粗糙版本了
 
+http://devernay.free.fr/cours/opengl/materials.html
+
 
 
 
