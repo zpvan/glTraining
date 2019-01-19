@@ -1666,17 +1666,208 @@ lightingShader.setVec3("light.specular", 1.0f, 1.0f, 1.0f);
 
 http://devernay.free.fr/cours/opengl/materials.html
 
+## 光照贴图
 
+使用光照贴图可以给材质添加更多的灵活性
 
+前面我们为整个物体定义了一个整体的材质, 但是现实世界中的对象通常不只一种材质, 而是有多种材质组成. 想象一辆汽车: 车框架是钢制的, 还喷了漆, 看上去闪亮闪亮的, 窗户的部分能照出周围的景物, 轮胎是橡胶不那么闪, 里边的骨架是钢就亮很多. 由此可见, 物体有很大可能是由不同材质组成的一个整体. 难道我们还对物体的每个部分都设置一个材质吗?
 
+当然不是, 我们有光照贴图! 严格来说, 有三种光照贴图: 环境光贴图, 漫反射贴图, 镜面高光贴图. 但是环境光和漫反射光的颜色相似, 知识稍微暗淡点, 所以我们可以把漫反射光的贴图用到环境光上. 剩下的就只有两种贴图了: 漫反射光贴图和镜面高光贴图.
 
+### 漫反射光贴图
 
+在纹理章节里, 我们直接把片元的颜色设置成从纹理中采样的颜色值, 而在这章中, 我们会对采样后的颜色值再进行一系列的计算, 这就是光照贴图(不管是漫反射还是镜面高光)的原理.
 
+由于是对漫反射颜色产生影响, 所以我们称之为漫反射光贴图. 但是, 使用的方法还是类似的. 本次我们使用下面的图来进行操作:
 
+<img src="./data/texture-light.png" style="zoom:100%"/>
 
+这是一个带金属边的木盒子.
 
+要使用这张图, 我们需要把材质结构中的环境光和漫反射属性去掉, 替换成2D纹理图.
 
+```glsl
+struct Material {
+    sampler2D diffuse;
+    vec3 specular;
+    float shininess;
+};
+...
+in vec2 TexCoords;
+```
 
+sampler2D是OpengGL中的隐含类型, 我们不能去设置它, 只能将它暴露出来让OpenGL自己去设置. 如果你强行设置, OpenGL会爆出一大堆乱七八糟的Error.
+
+改了材质结构之后, 引用的方式自然也得改, 从单纯的一个变量引用, 现在需要对纹理进行采样了.
+
+```glsl
+vec3 ambient = light.ambient * vec3(texture(material.diffuse, TexCoords));
+vec3 diffuse = light.diffuse * (diff * vec3(texture(material.diffuse, TexCoords)));
+```
+
+环境光也用一样的纹理(如果你非得要用别的纹理, 也没什么问题, 用同样的方法搞一张就行了), 替换掉material.diffuse和material.ambient之后, 就是这样了.
+
+当然, 如果你现在就编译运行, 是绝对看不到什么效果滴, 为啥? 因为我们还没有把纹理坐标传递给片元着色器啊. 使用纹理当然要为顶点指定纹理坐标, 然后将纹理坐标传递给顶点着色器, 让顶点着色器将纹理坐标传递给片元着色器. 顶点属性已经准备好了, 就是这样:
+
+```c
+float vertices[] = {
+    // 位置                // 法线              // 纹理坐标
+    -0.5f, -0.5f, -0.5f,  0.0f,  0.0f, -1.0f,  0.0f, 0.0f,
+     0.5f, -0.5f, -0.5f,  0.0f,  0.0f, -1.0f,  1.0f, 0.0f,
+     0.5f,  0.5f, -0.5f,  0.0f,  0.0f, -1.0f,  1.0f, 1.0f,
+     0.5f,  0.5f, -0.5f,  0.0f,  0.0f, -1.0f,  1.0f, 1.0f,
+    -0.5f,  0.5f, -0.5f,  0.0f,  0.0f, -1.0f,  0.0f, 1.0f,
+    -0.5f, -0.5f, -0.5f,  0.0f,  0.0f, -1.0f,  0.0f, 0.0f,
+
+    -0.5f, -0.5f,  0.5f,  0.0f,  0.0f, 1.0f,   0.0f, 0.0f,
+     0.5f, -0.5f,  0.5f,  0.0f,  0.0f, 1.0f,   1.0f, 0.0f,
+     0.5f,  0.5f,  0.5f,  0.0f,  0.0f, 1.0f,   1.0f, 1.0f,
+     0.5f,  0.5f,  0.5f,  0.0f,  0.0f, 1.0f,   1.0f, 1.0f,
+    -0.5f,  0.5f,  0.5f,  0.0f,  0.0f, 1.0f,   0.0f, 1.0f,
+    -0.5f, -0.5f,  0.5f,  0.0f,  0.0f, 1.0f,   0.0f, 0.0f,
+
+    -0.5f,  0.5f,  0.5f, -1.0f,  0.0f,  0.0f,  1.0f, 0.0f,
+    -0.5f,  0.5f, -0.5f, -1.0f,  0.0f,  0.0f,  1.0f, 1.0f,
+    -0.5f, -0.5f, -0.5f, -1.0f,  0.0f,  0.0f,  0.0f, 1.0f,
+    -0.5f, -0.5f, -0.5f, -1.0f,  0.0f,  0.0f,  0.0f, 1.0f,
+    -0.5f, -0.5f,  0.5f, -1.0f,  0.0f,  0.0f,  0.0f, 0.0f,
+    -0.5f,  0.5f,  0.5f, -1.0f,  0.0f,  0.0f,  1.0f, 0.0f,
+
+     0.5f,  0.5f,  0.5f,  1.0f,  0.0f,  0.0f,  1.0f, 0.0f,
+     0.5f,  0.5f, -0.5f,  1.0f,  0.0f,  0.0f,  1.0f, 1.0f,
+     0.5f, -0.5f, -0.5f,  1.0f,  0.0f,  0.0f,  0.0f, 1.0f,
+     0.5f, -0.5f, -0.5f,  1.0f,  0.0f,  0.0f,  0.0f, 1.0f,
+     0.5f, -0.5f,  0.5f,  1.0f,  0.0f,  0.0f,  0.0f, 0.0f,
+     0.5f,  0.5f,  0.5f,  1.0f,  0.0f,  0.0f,  1.0f, 0.0f,
+
+    -0.5f, -0.5f, -0.5f,  0.0f, -1.0f,  0.0f,  0.0f, 1.0f,
+     0.5f, -0.5f, -0.5f,  0.0f, -1.0f,  0.0f,  1.0f, 1.0f,
+     0.5f, -0.5f,  0.5f,  0.0f, -1.0f,  0.0f,  1.0f, 0.0f,
+     0.5f, -0.5f,  0.5f,  0.0f, -1.0f,  0.0f,  1.0f, 0.0f,
+    -0.5f, -0.5f,  0.5f,  0.0f, -1.0f,  0.0f,  0.0f, 0.0f,
+    -0.5f, -0.5f, -0.5f,  0.0f, -1.0f,  0.0f,  0.0f, 1.0f,
+
+    -0.5f,  0.5f, -0.5f,  0.0f,  1.0f,  0.0f,  0.0f, 1.0f,
+     0.5f,  0.5f, -0.5f,  0.0f,  1.0f,  0.0f,  1.0f, 1.0f,
+     0.5f,  0.5f,  0.5f,  0.0f,  1.0f,  0.0f,  1.0f, 0.0f,
+     0.5f,  0.5f,  0.5f,  0.0f,  1.0f,  0.0f,  1.0f, 0.0f,
+    -0.5f,  0.5f,  0.5f,  0.0f,  1.0f,  0.0f,  0.0f, 0.0f,
+    -0.5f,  0.5f, -0.5f,  0.0f,  1.0f,  0.0f,  0.0f, 1.0f
+}
+```
+
+替换之后, 在顶点着色器中添加属性的输入:
+
+```glsl
+layout (location = 2) in vec2 aTexCoords;
+...
+out vec2 TexCoords;
+
+void main() {
+    ...
+    TexCoords = aTexCoords;
+}
+```
+
+别忘了添加顶点的纹理属性, 然后将一众的属性跨度改成8 * sizeof(float)
+
+```c
+// 纹理属性
+glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *)(6 * sizeof(float)));
+glEnableVertexAttribArray(2);
+```
+
+因为我们的项目是开始了光照之后的新鲜货, 之前纹理章节中加载图片的代码已经没了, 正好我们把这部分的功能封装成一个函数, 用起来就简单了. 代码已经封装好了, 请看:
+
+```c
+// 加载纹理
+unsigned int loadTexture(char const *path) {
+    unsigned int textureID;
+    glGenTextures(1, &textureID);
+    
+    int width, height, nrComponents;
+    unsigned char *data = stbi_load(path, &width, &height, &nrComponents, 0);
+    if (data) {
+        GLenum = format;
+        if (nrComponents == 1) {
+            format = GL_RED;
+        } else if (nrComponents == 3) {
+            format = GL_RGB;
+        } else if (nrComponents == 4) {
+            format = GL_RGBA;
+        }
+        
+        glBindTexture(GL_TEXTURE_2D, textureID);
+        glTexImage2D(GL_TEXTURE_2D, 0, format, width, height, 0, format,          				GL_UNSIGNED_BYTE, data);
+        glGenerateMipmap(GL_TEXTURE_2D);
+        
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        
+        stbi_image_free(data);
+    }
+    else {
+        std::cout << "纹理加载失败, 路径是:" << path << std::endl;
+        stbi_image_free(data);
+    }
+    
+    return textureID;
+}
+```
+
+最后, 我们需要加载之前的图片做纹理, 设置漫反射纹理图, 启用这张纹理图:
+
+```c
+unsigned int diffuseMap = loadTexture("container2.png");
+...
+lightingShader.setInt("material.diffuse", 0);
+...
+glActiveTexture(GL_TEXTURE0);
+glBindTexture(GL_TEXTURE_2D, diffuseMap);
+```
+
+编译运行, 可以得到想要的结果
+
+### 镜面高光贴图
+
+咋一看效果倒是不错, 可是总感觉怪怪, 为啥一个木头箱子会有这么亮的反光呢? 我们来修复这个问题, 将木头的部分反光效果去除, 边框金属部分的反光效果保留. 这个过程看上去和漫反射贴图一样, 巧合? 我想不是.
+
+用一张纹理图来充当镜面高光的效果图. 我们需要生成一张黑白的纹理图(当然你想用彩色的也没问题), 这张图已经准备好了, 就是下面这张:
+
+<img src="./data/specular-texture.png" style="zoom:100%"/>
+
+木头部分没有镜面高光效果, 所以是黑色的, 外面的金属框有镜面高光效果, 所以其颜色为灰色.
+
+严格来说, 木头也是有高光效果的, 只是非常微弱, 大部分都被散射掉了. 将高光效果设置成了0
+
+用神器PS或者其他的软件就能做出一张合格的纹理图.
+
+先来把片元着色器中得代码改一改:
+
+```glsl
+struct Material {
+    sampler2D diffuse;
+    sampler2D specular;
+    float shininess;
+};
+...
+vec3 specular = light.specular * (spec * vec3(texture(material.specular, TexCoords)));
+...
+```
+
+将材质中的镜面高光改成纹理采样, 计算镜面高光的时候也改成纹理采样.
+
+```c
+unsigned int specularMap = loadTexture("container2_specular.png");
+lightingShader.setInt("material.specular", 1);
+...
+glActiveTexture(GL_TEXTURE1);
+glBindTexture(GL_TEXTURE_2D, specularMap);
+```
+
+编译运行, 效果就正常好多了
 
 
 
