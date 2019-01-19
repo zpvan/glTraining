@@ -1869,25 +1869,232 @@ glBindTexture(GL_TEXTURE_2D, specularMap);
 
 编译运行, 效果就正常好多了
 
+## 三种光源类型
+
+之前的文章中, 我们把光源定义成空间的一点. 效果确实不错, 但是还不足以模拟现实世界中的大部分光源. 一个简单的例子, 它无法模拟太阳光. 在本章中, 我们会介绍3种模拟真实世界中光源的模型, 使用这三种模型我们可以模拟绝大部分的光源. 这三种光源模型是: 方向光, 点光源, 聚光灯.
+
+### 方向光(Directional Light)
+
+方向光模型模拟的是一个非常远的地方发射出来的光. 在非常远的距离上, 到物体上就近似于平行. 想想太阳光, 太广距离地球大约1.5亿公里, 地球的半径是6378公里, 算起来, 太阳光照射的角度范围大约只有0.0024度, 照到地球的时候和平行也没什么区别了.
+
+<img src="./data/directional-light.png" style="zoom:100%"/>
+
+ 由于光线都是平行照射, 光照效果也就和光源位置无关. 所以, 方向光的模型需要的是一个方向参数而不是位置, 着色器在计算的时候也几乎相同. 我们来改一下光源结构:
+
+```glsl
+struct Light {
+    vec3 direction;
+    vec3 ambient;
+    vec3 diffuse;
+    vec3 specular;
+};
+
+void main() {
+    ...
+    vec3 lightDir = normalize(-light.direction);
+    ...
+}
+```
+
+注意我们要光线方向的反方向用于计算角度. 那为啥不直接指定反方向呢? 这是一个习惯的问题, 说到方向光, 我们最直接的反应就是光线方向, 这最符合我们的逻辑认识.
+
+要观察方向光德效果, 我们需要在之前显示3D盒子章节中的10个盒子. 回忆一下之前的章节, 首先我们要需要10个不同的位置:
+
+```c
+glm::vec3 cubePositions[] = {
+    glm::vec3( 0.0f,  0.0f,  0.0f), 
+  glm::vec3( 2.0f,  5.0f, -15.0f), 
+  glm::vec3(-1.5f, -2.2f, -2.5f),  
+  glm::vec3(-3.8f, -2.0f, -12.3f),  
+  glm::vec3( 2.4f, -0.4f, -3.5f),  
+  glm::vec3(-1.7f,  3.0f, -7.5f),  
+  glm::vec3( 1.3f, -2.0f, -2.5f),  
+  glm::vec3( 1.5f,  2.0f, -2.5f), 
+  glm::vec3( 1.5f,  0.2f, -1.5f), 
+  glm::vec3(-1.3f,  1.0f, -1.5f)
+};
+```
+
+还需要10个把模型从局部空间转换到世界空间的模型矩阵:
+
+```c
+for (unsigned int i = 0; i < 10; i++) {
+    glm::mat4 model;
+    model = glm::translate(model, cubePositions[i]);
+    float angle = 20.0f * i;
+    model = glm::rotate(model, glm::radians(angle), glm::vec3(1.0f, 0.3f, 0.5f));
+    lightingShader.setMat4("model", model);
+    
+    glDrawArrays(GL_TRIANGLES, 0, 36);
+}
+```
+
+最后, 别忘了设置方向光, 你可以在主循环外面, 也可以在主循环里面设置. 当然, 之前对光源位置的引用也都需要删除.
+
+```c
+lightingShader.setVec3("light.direction", -0.2f, -1.0f, -0.3f);
+```
+
+编译运行, 看上去像是从天上有光照下来把这些箱子照亮了.
+
+### 点光源(Point Light)
+
+方向光通常用来模拟整个场景接收的全局光照, 但是除了全局光照之外, 我们通常还需要一些小的光源, 例如一个灯泡之类的. 这些光源就是点光源. 点光源常常被设置在某个位置上, 然后随着离距离的变远光照强度变小.
+
+<img src="./data/point-light.png" style="zoom:100%"/>
+
+之前的章节里, 我们用到了最简单的点光源. 这个点光源有个缺点, 就是光照不会随着距离减弱, 反而好像是越来越强了. 这显然是不符合常理的. 在大多数3D场景中, 我们希望的点光源是像现实生活中那样, 只能照亮周围一下片区域.
+
+如果实现过之前章节中的10个盒子, 你可能会注意到盒子背面的亮度和前面的亮度是一致的, 因为我们没有对光照的强度进行衰减. 光照应该是随着距离越远越弱.
+
+#### 衰减(Attenuation)
+
+随着距离的变远光照强度减弱的过程我们称之为衰减. 一个简单的方法是直接采用碱性衰减: 设定一个衰减比例, 随着距离减少强度. 但是这种衰减不符合现实的情况, 现实情况是光照会在短距离之内迅速衰减, 然后缓慢衰减直至消失. 没错, 这更像是一种二次衰减模型.
+
+幸运的是, 有一些聪明的前辈已经将这个衰减公式给计算出来了. 我们直接就能使用:
+
+<img src="./data/attenuation.png" style="zoom:100%"/>
+
+这里的d表示距离(distance), 是片元到光源的距离. 公式中包含了3个常熟因子, 分别是Kc, Kl 和 Kq. 这三个因子分别是常数衰减指数, 线性衰减指数, 二次项衰减指数.
 
 
 
+因为二次项的衰减会比前面的线性和常数衰减快很多, 造成的结果就是在离光源近的地方会很亮, 然后离开光源, 亮度迅速衰减, 到一定程度后衰减又会减慢. 这个过程看来就是像这个样子:
 
+<img src="./data/attenuation-chart.png" style="zoom:100%"/>
 
+3个衰减因子到底应该选多少呢?
 
+衰减因子取决于很多因素: 环境, 你期望光源覆盖的范围, 光的类型等等. 大多数情况下, 这是一个经验和微调的问题. 下面一张表里给出了覆盖范围和衰减因子的取值关系, 这些值是非常好的微调基准值
 
+<img src="./data/attenuation-factor.png" style="zoom:100%"/>
 
+就像你看到的这样, Kc永远是1, Kl随着覆盖范围增大变得非常小, 而Kq变小的就更快了. 有时间试试这些值, 对渲染场景的影响. 在本文中, 我们选择覆盖范围是50.
 
+实现点光源效果. 光源的位置属性, 再往Light结构中添加三个float变量表示3个不同的衰减因子, 这些因子可以通过主函数设置.
 
+```glsl
+struct Light {
+    //vec3 direction;
+    vec3 position;
+    
+    vec3 ambient;
+    vec3 diffuse;
+    vec3 specular;
+    
+    float constant;
+    float linear;
+    float quadratic;
+};
+```
 
+然后我们就可以在主函数中设置这些值了, 对照上面的表, 我们的3个衰减因子分别设置为: 1.0f, 0.09f, 0.032f
 
+```c
+lightingShader.setFloat("light.constant", 1.0f);
+lightingShader.setFloat("light.linear", 0.09f);
+lightingShader.setFloat("light.quadratic", 0.032f);
+```
 
+将衰减值应用到光照中去也非常简单, 只要计算出衰减值, 然后乘上ambient, diffuse和specular分量就行了.
 
+先计算衰减值. 我们要用到片元距离光源的距离, 这就要用到GLSL内置的length函数了, 这个函数作用是计算一个向量的长度, 我们把光源位置和片元位置做减法就可以得到这个向量.
 
+```glsl
+float distance = length(light.position - FragPos);
+float attenuation = 1.0 / (light.constant + light.linear * distance + light.quadratic * (distance * distance));
+ambient *= attenuation;
+diffuse *= attenuation;
+specular *= attenuation;
+```
 
+### 聚光灯(Spot Light)
 
+聚光灯模型, 模拟的是手电筒, 探照灯之类可以把光汇聚到一个方向的光源. 它用到了平行光和点光源的部分内容, 我们在设置聚光灯的时候, 需要设置其位置和朝向, 并且光照强度会随着距离而减小. 特别的地方是, 聚光灯的光只会对某个方向上的有限圆锥角的物体有照亮效果, 如下图所示:
 
+<img src="./data/spot-light.png" style="zoom:100%"/>
 
+* LightDir(光照方向): 表示光源到片元的方向
+* SpotDir(聚光灯朝向): 表示聚光灯前方的方向, 也就是影响方向
+* Phi: 范围角度, 所有在这个角度范围之外的物体都不会被照亮
+* Theta: 光照方向和聚光灯朝向的夹角, 用来计算光照强度
+
+#### 实现一个手电筒
+
+```glsl
+struct Light {
+    vec3 position;
+    vec3 direction;
+    float cutOff;
+    ...
+};
+```
+
+设置这些值:
+
+```c
+lightingShader.setVec3("light.position", camera.Position);
+lightingShader.setVec3("light.direction", camera.Front);
+lightingShader.setVec3("light.curOff", glm::cos(glm::radians(12.5f)));
+```
+
+可以看到, 我们是用cos角度值来代替原本的角度, 因为这样比较简单. 我们可以直接计算光照方向和聚光灯方向的点积, 然后和这个数值进行比较从而得出该店是否接收光照这个结论.
+
+现在, 我们在片元着色器里计算片元和光源之间的方向与聚光灯朝向之间的夹角是否超过了照射范围:
+
+```glsl
+float theta = dot(lightDir, normalize(-light.direction));
+if (theta > ligth.cutOff) {
+    // 在照射范围内
+} else {
+    FragColor = vec4(light.ambient * vec3(texture(material.diffuse, TexCoords)), 1.0);
+}
+```
+
+注意, cos的值随着角度变大而逐渐变小, 所以判断的方式是theta > light.cutOff表示在照射范围内.
+
+编译运行, 效果看上去有点假, 不够真实.
+
+#### 平滑边缘
+
+为了创建一个平滑的边缘效果, 我们需要改变一下聚光灯的模型, 模拟聚光灯的内锥角和外锥角. 计算方式也会有所改变.
+
+假设内锥角为ϕ，外锥角为γ， 光照角度为θ，我们的光照强度的计算公式就是
+$$
+I = (θ - γ) / cos(ϕ - γ)
+$$
+结果I 就表示当前片元的光照强度
+
+让我们来看计算代码:
+
+```glsl
+struct Light {
+    ...
+    float outerCutOff;
+};
+
+// 聚光灯
+// 计算片元角度的cos值
+float theta = dot(lightDir, normalize(-light.direction));
+// 计算epsilon的值, 用内锥角的cos值减去外锥角的cos值
+float epsilon = light.cutOff - light.outerCutOff;
+// 根据公式计算光照强度, 并限制结果的范围
+float intensity = clamp((theta - light.outerCutOff) / epsilon, 0.0, 1.0);
+
+diffuse *= intensity;
+specular *= intensity;
+```
+
+强度被限制在0到1之间, 这是必要的, 因为theta-light.outerCutOff的值可能是负数
+
+最后, 设置内锥角度为12.5度, 外锥角度为17.5度, 设置代码如下:
+
+```c
+lightingShader.setFloat("light.cutOff", glm::cos(glm::radians(12.5f)));
+lightingShader.setFloat("light.outerCutOff", glm::cos(glm::radians(17.5f)));
+```
+
+编译运行, 效果就正常且有趣多了.
 
 
 
