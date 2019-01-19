@@ -2096,21 +2096,289 @@ lightingShader.setFloat("light.outerCutOff", glm::cos(glm::radians(17.5f)));
 
 编译运行, 效果就正常且有趣多了.
 
+## 多光源
 
+前面, 我们学了很多OpenGL中的光照知识, 包括冯氏着色, 材质, 光照贴图以及不同类型的光源模型等等. 本章中, 我们要把这些知识都组合起来, 在场景中创造6个光源. 我们要创造1个方向光, 4个点光源以及1个聚光灯, 然后看看整个场景会是什么样子
 
+### 封装光源操作
 
+为了使用多个光源, 我们将会把光照计算的操作封装进GLSL函数中. 如果你是一个新手, 可能觉得这不是必要的操作. 如果你有一些经验, 将代码封装成函数是一件自然而然的事情, 这样做不仅结构清晰, 而且易于使用.
 
+我们已经学了很多GLSL的语法, 但是封装函数还没有学到. 不过不用担心, GLSL中的函数和C中的函数很相似, 都需要一个函数名, 一个返回值, 在调用之前需要声明等等. 对于三种不同的光源模型, 我们定义了3个不同的函数, 分别是: CalcDirLight, CalcPointLight和CalcSpotLight.
 
+想想在一个场景中, 很多的光源照射到同一个物体上时, 物体会呈现出什么样子? 多种光的效果会叠加起来, 呈现出一种混合的状态, 我们试着来总结一个流程:
 
+1 一个颜色向量表示片元的输出颜色
 
+2 计算每个光源对输出颜色的影响, 将所有的结果相加
 
+3 将所有结果的和传递给片元颜色作为最终结果
 
+用伪代码表示这个过程就是这样:
 
+```fake_code
+void main() {
+    vec3 output = vec3(0, 0);
+    output += 计算方向光的函数;
+    for (int i = 0; i < 点光源数量; ++i) {
+        output += 计算点光源的函数;
+    }
+    output += 计算聚光灯的函数;
+    FragColor = vec4(output, 1.0);
+}
+```
 
+在实现的过程, 实际的代码可能与这个不同, 不必拘泥于这个代码形式, 思路是这样就不会有问题. 接下来, 我们来定义一些计算不同光源对片元颜色产生影响的函数.
 
+#### 方向光
 
+函数形式非常简单, 只需根据输入的参数计算方向光对当前片元颜色的影响并返回结果就行了. 不过首先, 我们要来定义一个方向光源的结构体.
 
+```glsl
+// 方向光源
+struct DirLight {
+    vec3 direction;
+    
+    vec3 ambient;
+    vec3 diffuse;
+    vec3 specular;
+};
+uniform DirLight dirLight;
+```
 
+之后, 将这个方向光源作为参数传递到计算光照的函数中:
+
+```glsl
+vec3 CalcDirLight(DirLight light, vec3 normal, vec3 viewDir);
+```
+
+可以看到, 这个函数需要一个DirLight的对象, 法线参数, 以及观察方向. 如果你非常熟悉之前的代码, 那么实现这个函数就轻而易举:
+
+```glsl
+vec3 CalcDirLight(DirLight light, vec3 normal, vec3 viewDir) {
+    vec3 lightDir = normalize(-light.direction);
+    
+    // 环境光
+    vec3 ambient = light.ambient * vec3(texture(material.diffuse, TexCoords));
+    
+    // 漫反射
+    float diff = max(dot(normal, lightDir), 0.0);
+    vec3 diffuse = light.diffuse * diff * vec3(texture(material.diffuse, TexCoords));
+    
+    // 镜面高光
+    vec3 reflectDir = reflect(-lightDir, normal);
+    float spec = pow(max(dot(viewDir, reflectDir), 0.0), material.shininess);
+    vec3 specular = light.specular * spec * vec3(texture(material.specular, 				TexCoords));
+    
+    return (ambient + diffuse + specular);
+}
+```
+
+#### 点光源
+
+和方向光一样, 我们先要定义一个点光源的结构, 然后创建4个点光源. 不同的是, 我们采用数组的方式来创建4个点光源, 具体实现如下:
+
+```glsl
+// 点光源
+struct PointLight {
+    vec3 position;
+    
+    float constant;
+    float linear;
+    float quadratic;
+    
+    vec3 ambient;
+    vec3 diffuse;
+    vec3 specular;
+};
+#define NR_POINT_LIGHTS 4
+uniform PointLight pointLight[NR_POINT_LIGHTS];
+```
+
+如你所见, 定义数组的语法也和C类似. 当然我们可以把所有的数据放到一个光源结构中, 这样所有的光源都能使用同一个结构. 但是定义不同的结构, 这样更简洁, 扩展性更好, 占用的空间也更少.
+
+计算光照的原型如下:
+
+```glsl
+vec3 CalcPointLight(PointLight light, vec3 normal, vec3 fragPos, vec3 viewDir);
+```
+
+实现的方式也和之前的代码一样, 我们复制粘贴过来, 然后做些修改:
+
+```glsl
+// 计算点光源的影响
+vec3 CalcPointLight(PointLight light, vec3 normal, vec3 fragPos, vec3 viewDir) {
+    // 环境光
+    vec3 ambient = light.ambient * vec3(texture(material.diffuse, TexCoords));
+    
+    // 漫反射光
+	vec3 norm = normalize(normal);
+	vec3 lightDir = normalize(light.position - FragPos);
+	
+	float diff = max(dot(norm, lightDir), 0.0);
+	vec3 diffuse = light.diffuse * diff * vec3(texture(material.diffuse, TexCoords));
+	
+	// 镜面高光
+	vec3 reflectDir = reflect(-lightDir, norm);
+	float spec = pow(max(dot(viewDir, reflectDir), 0.0), material.shininess);
+	vec3 specular = light.specular * spec * vec3(texture(material.specular, 				TexCoords));
+	
+	// 衰减
+	float distance = length(light.position - FragPos);
+	float attenuation = 1.0 / (light.constant + light.linear * distance + 					light.quadratic * (disatance * distance));
+	ambient *= attenuation;
+	diffuse *= attenuation;
+	specular *= attenuation;
+	
+	return ambient + diffuse + specular;
+}
+```
+
+#### 聚光灯
+
+```glsl
+// 计算聚光灯的影响
+vec3 CalcSpotLight(SpotLight light, vec3 normal, vec3 fragPos, vec3 viewDir) {
+    // 环境光
+    vec3 ambient = light.ambient * vec3(texture(material.diffuse, TexCoords));
+    
+    // 漫反射光
+    vec3 norm = normalize(normal);
+    vec3 lightDir = normalize(light.position - fragPos);
+    
+    //聚光灯
+    float theta = dot(lightDir, normalize(-light.direction));   //计算片元角度的cos值
+    float epsilon = light.cutOff - light.outerCutOff;   //计算epsilon的值，用内锥角的cos值减去外锥角的cos值
+    float intensity = clamp((theta - light.outerCutOff) / epsilon, 0.0, 1.0);   //根据公式计算光照强度，并限制结果的范围
+
+    diffuse *= intensity;
+    specular *= intensity;
+
+    //衰减
+    float distance = length(light.position - FragPos);
+    float attenuation = 1.0 / (light.constant + light.linear * distance + light.quadratic * (distance * distance));
+    ambient *= attenuation;
+    diffuse *= attenuation;
+    specular *= attenuation;
+
+    return ambient + diffuse + specular;
+}
+```
+
+修改了一些变量名, 比如normal, 观察方向也不需要计算, 直接可以使用.
+
+### 整合
+
+根据之前分析的结构, 将代码补充完整:
+
+```glsl
+void main()
+{
+    vec3 norm = normalize(Normal);
+    vec3 viewDir = normalize(viewPos - FragPos);
+
+    //方向光
+    vec3 result = CalcDirLight(dirLight, norm, viewDir);
+
+    //点光源
+    for(int i = 0; i < NR_POINT_LIGHTS; ++i)
+        result += CalcPointLight(pointLights[i], norm, FragPos, viewDir);
+
+    //聚光灯
+    result += CalcSpotLight(spotLight, norm, FragPos, viewDir);
+ 
+    FragColor = vec4(result, 1.0f);
+}
+```
+
+在主函数中设置结构体中的元素已经很熟悉了, 那么怎么设置数组中的元素呢? 
+
+```c
+lightingShader.setFloat("pointLights[0].constant", 1,0f);
+```
+
+像C语言访问数组那样访问一个元素, 然后设置其值.
+
+别忘了还有光源的位置我们没有设置, 来看看我们把这些点光源放在哪里:
+
+```c
+glm::vec3 pointLightPositions[] = {
+    glm::vec3( 0.7f,  0.2f,  2.0f),
+    glm::vec3( 2.3f, -3.3f, -4.0f),
+    glm::vec3(-4.0f,  2.0f, -12.0f),
+    glm::vec3( 0.0f,  0.0f, -3.0f)
+};
+```
+
+接下来, 我们就要为着色器中的这些元素赋值了, 你可能回想, 这里面这些多元素, 难道要一个一个去赋值吗? 目前来说, 我们还没有简单的赋值方法, 只能手动赋值.
+
+```c
+/*
+为光源赋值
+*/
+// 方向光
+lightingShader.setVec3("dirLight.direction", -0.2f, -1.0f, -0.3f);
+lightingShader.setVec3("dirLight.ambient", 0.05f, 0.05f, 0.05f);
+lightingShader.setVec3("dirLight.diffuse", 0.4f, 0.4f, 0.4f);
+lightingShader.setVec3("dirLight.specular", 0.5f, 0.5f, 0.5f);
+// 点光源1
+lightingShader.setVec3("pointLights[0].position", pointLightPositions[0]);
+lightingShader.setVec3("pointLights[0].ambient", 0.05f, 0.05f, 0.05f);
+lightingShader.setVec3("pointLights[0].diffuse", 0.8f, 0.8f, 0.8f);
+lightingShader.setVec3("pointLights[0].specular", 1.0f, 1.0f, 1.0f);
+lightingShader.setFloat("pointLights[0].constant", 1.0f);
+lightingShader.setFloat("pointLights[0].linear", 0.09);
+lightingShader.setFloat("pointLights[0].quadratic", 0.032);
+// 点光源2
+lightingShader.setVec3("pointLights[1].position", pointLightPositions[1]);
+lightingShader.setVec3("pointLights[1].ambient", 0.05f, 0.05f, 0.05f);
+lightingShader.setVec3("pointLights[1].diffuse", 0.8f, 0.8f, 0.8f);
+lightingShader.setVec3("pointLights[1].specular", 1.0f, 1.0f, 1.0f);
+lightingShader.setFloat("pointLights[1].constant", 1.0f);
+lightingShader.setFloat("pointLights[1].linear", 0.09);
+lightingShader.setFloat("pointLights[1].quadratic", 0.032);
+// 点光源3
+lightingShader.setVec3("pointLights[2].position", pointLightPositions[2]);
+lightingShader.setVec3("pointLights[2].ambient", 0.05f, 0.05f, 0.05f);
+lightingShader.setVec3("pointLights[2].diffuse", 0.8f, 0.8f, 0.8f);
+lightingShader.setVec3("pointLights[2].specular", 1.0f, 1.0f, 1.0f);
+lightingShader.setFloat("pointLights[2].constant", 1.0f);
+lightingShader.setFloat("pointLights[2].linear", 0.09);
+lightingShader.setFloat("pointLights[2].quadratic", 0.032);
+// 点光源4
+lightingShader.setVec3("pointLights[3].position", pointLightPositions[3]);
+lightingShader.setVec3("pointLights[3].ambient", 0.05f, 0.05f, 0.05f);
+lightingShader.setVec3("pointLights[3].diffuse", 0.8f, 0.8f, 0.8f);
+lightingShader.setVec3("pointLights[3].specular", 1.0f, 1.0f, 1.0f);
+lightingShader.setFloat("pointLights[3].constant", 1.0f);
+lightingShader.setFloat("pointLights[3].linear", 0.09);
+lightingShader.setFloat("pointLights[3].quadratic", 0.032);
+// 聚光灯
+lightingShader.setVec3("spotLight.position", camera.Position);
+lightingShader.setVec3("spotLight.direction", camera.Front);
+lightingShader.setVec3("spotLight.ambient", 0.0f, 0.0f, 0.0f);
+lightingShader.setVec3("spotLight.diffuse", 1.0f, 1.0f, 1.0f);
+lightingShader.setVec3("spotLight.specular", 1.0f, 1.0f, 1.0f);
+lightingShader.setFloat("spotLight.constant", 1.0f);    lightingShader.setFloat("spotLight.linear", 0.09);
+lightingShader.setFloat("spotLight.quadratic", 0.032);
+lightingShader.setFloat("spotLight.cutOff", glm::cos(glm::radians(12.5f)));
+lightingShader.setFloat("spotLight.outerCutOff", glm::cos(glm::radians(15.0f)));
+```
+
+为光源赋值之后, 我们还要把其余的光源也创建出来.
+
+```c
+glBindVertexArray(lightVAO);
+for (unsigned int i = 0; i < 4; ++i) {
+    glm::mat4 model2;
+    model2 = glm::translate(model2, pointLightPositions[i]);
+    model2 = glm::scale(model2, glm::vec3(0.2f));
+    lampShader.setMat4("model", glm::value_ptr(model2));
+    glDrawArrays(GL_TRIANGLES, 0, 36);
+}
+```
+
+这里只有一点要注意, 就是要使用光源VAO之后再绘制光源立方体
 
 
 
