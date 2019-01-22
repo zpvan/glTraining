@@ -1594,7 +1594,7 @@ void main() {
     vec3 diffuse = lightColor * (diff * material.diffuse);
     
     // 镜面高光
-    vec3 viewDir = normalize(-FragPos);
+    vec3 viewDir = normalize(viewPos -FragPos);
     vec3 reflectDir = reflect(-lightDir, norm);
     float spec = pow(max(dot(viewDir, reflectDir), 0.0), material.shiniess);
     vec3 specular = lightColor * (spec * material.specular);
@@ -2035,7 +2035,7 @@ struct Light {
 ```c
 lightingShader.setVec3("light.position", camera.Position);
 lightingShader.setVec3("light.direction", camera.Front);
-lightingShader.setVec3("light.curOff", glm::cos(glm::radians(12.5f)));
+lightingShader.setFloat("light.curOff", glm::cos(glm::radians(12.5f)));
 ```
 
 可以看到, 我们是用cos角度值来代替原本的角度, 因为这样比较简单. 我们可以直接计算光照方向和聚光灯方向的点积, 然后和这个数值进行比较从而得出该店是否接收光照这个结论.
@@ -2044,7 +2044,7 @@ lightingShader.setVec3("light.curOff", glm::cos(glm::radians(12.5f)));
 
 ```glsl
 float theta = dot(lightDir, normalize(-light.direction));
-if (theta > ligth.cutOff) {
+if (theta > light.cutOff) {
     // 在照射范围内
 } else {
     FragColor = vec4(light.ambient * vec3(texture(material.diffuse, TexCoords)), 1.0);
